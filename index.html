@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <title>X Layer 链上日记</title>
-  <script src="https://cdn.jsdelivr.net/npm/ethers/dist/ethers.min.js"></script>
+  <!-- 使用更稳定的 ethers CDN -->
+  <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js" type="application/javascript"></script>
   <style>
     body { font-family: sans-serif; padding: 20px; background: #f9fafb; }
     h1 { color: #333; }
@@ -11,38 +12,74 @@
     button { padding: 10px 20px; margin-top: 10px; cursor: pointer; border: none;
              background: #4f46e5; color: white; border-radius: 8px; font-size: 16px; }
     #status { margin-top: 15px; font-family: monospace; color: #555; }
+    .error { color: #dc2626; }
+    .success { color: #059669; }
+    .warning { color: #d97706; }
   </style>
 </head>
 <body>
   <h1>📓 X Layer 链上日记 (Memo)</h1>
   <p>写下你的日记，点击按钮即可铭刻在链上。</p>
   <textarea id="diary" placeholder="今天想记录点什么？"></textarea><br/>
-  <button onclick="sendDiary()">✍️ 铭刻日记</button>
+  <button onclick="sendDiary()" id="submitBtn">✍️ 铭刻日记</button>
   <div id="status"></div>
 
   <script>
+    // 检查 ethers 是否正确加载
+    function checkEthers() {
+      if (typeof ethers === 'undefined') {
+        document.getElementById('status').innerHTML = '<span class="error">❌ Ethers 库加载失败，请刷新页面重试</span>';
+        document.getElementById('submitBtn').disabled = true;
+        return false;
+      }
+      return true;
+    }
+
+    // 获取钱包提供者
+    function getWalletProvider() {
+      // 优先使用 MetaMask
+      if (window.ethereum && window.ethereum.isMetaMask) {
+        return window.ethereum;
+      }
+      // 尝试其他钱包
+      if (window.ethereum) {
+        return window.ethereum;
+      }
+      return null;
+    }
+
     async function sendDiary() {
       const status = document.getElementById("status");
       const diaryText = document.getElementById("diary").value.trim();
 
-      if (!diaryText) {
-        status.innerText = "⚠️ 请输入内容";
+      if (!checkEthers()) {
         return;
       }
 
-      if (!window.ethereum) {
-        status.innerText = "❌ 请先安装 MetaMask";
+      if (!diaryText) {
+        status.innerHTML = '<span class="warning">⚠️ 请输入内容</span>';
+        return;
+      }
+
+      const provider = getWalletProvider();
+      if (!provider) {
+        status.innerHTML = '<span class="error">❌ 请先安装 MetaMask 或其他以太坊钱包</span>';
         return;
       }
 
       try {
-        await ethereum.request({ method: "eth_requestAccounts" });
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
+        // 请求账户连接
+        await provider.request({ method: "eth_requestAccounts" });
+        
+        // 使用 ethers v5 语法
+        const ethersProvider = new ethers.providers.Web3Provider(provider);
+        const signer = ethersProvider.getSigner();
 
         // 转给自己地址
         const to = await signer.getAddress();
-        const dataHex = ethers.hexlify(ethers.toUtf8Bytes(diaryText));
+        const dataHex = ethers.utils.toUtf8Bytes(diaryText);
+
+        status.innerHTML = '<span class="warning">⏳ 正在发送交易...</span>';
 
         const tx = await signer.sendTransaction({
           to,
@@ -50,15 +87,29 @@
           data: dataHex
         });
 
-        status.innerText = "⏳ 交易发送中: " + tx.hash;
+        status.innerHTML = '<span class="warning">⏳ 交易发送中: ' + tx.hash + '</span>';
+        
         const receipt = await tx.wait();
-        status.innerText = "✅ 铭刻完成! 区块号: " + receipt.blockNumber + 
-                           "\n交易哈希: " + tx.hash;
+        status.innerHTML = '<span class="success">✅ 铭刻完成! 区块号: ' + receipt.blockNumber + 
+                           '<br>交易哈希: ' + tx.hash + '</span>';
       } catch (err) {
         console.error(err);
-        status.innerText = "❌ 出错: " + err.message;
+        let errorMsg = err.message;
+        if (err.code === 4001) {
+          errorMsg = "用户拒绝了连接请求";
+        } else if (err.code === -32002) {
+          errorMsg = "请检查 MetaMask 弹窗并确认连接";
+        }
+        status.innerHTML = '<span class="error">❌ 出错: ' + errorMsg + '</span>';
       }
     }
+
+    // 页面加载完成后检查
+    window.addEventListener('load', function() {
+      if (!checkEthers()) {
+        console.error('Ethers library not loaded');
+      }
+    });
   </script>
 </body>
 </html>
